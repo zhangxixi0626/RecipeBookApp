@@ -36,6 +36,21 @@ public class CustomRecipeStore {
         saveNames(names);
     }
 
+    public List<String> exportNames() {
+        return loadNames();
+    }
+
+    public void importNames(List<String> names) {
+        List<String> cleaned = new ArrayList<>();
+        for (String name : names) {
+            String trimmed = name.trim();
+            if (!trimmed.isEmpty()) {
+                cleaned.add(trimmed);
+            }
+        }
+        saveNames(cleaned);
+    }
+
     private Recipe createRecipe(int id, String name) {
         return new Recipe(
                 id,

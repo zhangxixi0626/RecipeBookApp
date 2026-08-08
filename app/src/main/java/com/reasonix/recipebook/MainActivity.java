@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
@@ -25,6 +26,8 @@ public class MainActivity extends Activity {
     private FavoriteStore favoriteStore;
     private CustomRecipeStore customRecipeStore;
     private WeeklyPlanStore weeklyPlanStore;
+    private WebDavSettingsStore webDavSettingsStore;
+    private WebDavBackupManager webDavBackupManager;
     private LinearLayout list;
     private TextView countText;
     private EditText searchInput;
@@ -37,6 +40,8 @@ public class MainActivity extends Activity {
         favoriteStore = new FavoriteStore(this);
         customRecipeStore = new CustomRecipeStore(this);
         weeklyPlanStore = new WeeklyPlanStore(this);
+        webDavSettingsStore = new WebDavSettingsStore(this);
+        webDavBackupManager = new WebDavBackupManager();
         reloadRecipes();
         setContentView(buildHome());
         renderRecipes();
@@ -79,6 +84,10 @@ public class MainActivity extends Activity {
         Button weeklyPlan = greenButton("随机生成一周菜单");
         weeklyPlan.setOnClickListener(v -> generateWeeklyPlan());
         root.addView(weeklyPlan, topMargin(dp(10)));
+
+        Button settings = outlineButton("设置与备份");
+        settings.setOnClickListener(v -> showSettingsDialog());
+        root.addView(settings, topMargin(dp(10)));
 
         View savedPlan = savedWeeklyPlanCard();
         if (savedPlan != null) {
@@ -322,6 +331,136 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void showSettingsDialog() {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(18), dp(8), dp(18), dp(6));
+        scroll.addView(content);
+
+        TextView intro = text("建议设置项：WebDAV备份、每日菜数、是否允许重复、菜库分类、数据恢复。当前先实现 WebDAV 备份和恢复。", 14, 0xFF776B62, false);
+        intro.setPadding(0, 0, 0, dp(12));
+        content.addView(intro);
+
+        EditText urlInput = labeledInput(content, "WebDAV地址", "例如：https://example.com/dav/recipebook-backup.json");
+        urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        urlInput.setText(webDavSettingsStore.getUrl());
+
+        EditText usernameInput = labeledInput(content, "账号", "WebDAV账号，可为空");
+        usernameInput.setText(webDavSettingsStore.getUsername());
+
+        EditText passwordInput = labeledInput(content, "密码", "WebDAV密码，可为空");
+        passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        passwordInput.setText(webDavSettingsStore.getPassword());
+
+        TextView hint = text("为保护数据，WebDAV地址需要使用 https://。如果地址以 / 结尾，会自动保存为 recipebook-backup.json。备份内容包括：我会做的菜、本周菜单。", 13, 0xFF776B62, false);
+        hint.setPadding(0, dp(10), 0, dp(12));
+        content.addView(hint);
+
+        Button backup = greenButton("立即备份到WebDAV");
+        Button restore = outlineButton("从WebDAV恢复");
+        content.addView(backup);
+        content.addView(restore, topMargin(dp(10)));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("设置")
+                .setView(scroll)
+                .setPositiveButton("完成", null)
+                .create();
+
+        backup.setOnClickListener(v -> {
+            String url = urlInput.getText().toString().trim();
+            if (url.isEmpty()) {
+                urlInput.setError("请输入WebDAV地址");
+                return;
+            }
+            webDavSettingsStore.save(url, usernameInput.getText().toString(), passwordInput.getText().toString());
+            backupToWebDav(url, usernameInput.getText().toString(), passwordInput.getText().toString());
+        });
+
+        restore.setOnClickListener(v -> {
+            String url = urlInput.getText().toString().trim();
+            if (url.isEmpty()) {
+                urlInput.setError("请输入WebDAV地址");
+                return;
+            }
+            webDavSettingsStore.save(url, usernameInput.getText().toString(), passwordInput.getText().toString());
+            confirmRestoreFromWebDav(url, usernameInput.getText().toString(), passwordInput.getText().toString(), dialog);
+        });
+
+        dialog.show();
+    }
+
+    private EditText labeledInput(LinearLayout parent, String label, String hint) {
+        TextView labelView = text(label, 14, 0xFF26211E, true);
+        labelView.setPadding(0, dp(8), 0, dp(4));
+        parent.addView(labelView);
+
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint(hint);
+        input.setTextSize(15);
+        input.setPadding(dp(12), 0, dp(12), 0);
+        input.setMinHeight(dp(46));
+        input.setBackground(roundedBackground(0xFFFFFFFF, 8, 0xFFE8DDD1));
+        parent.addView(input, matchWrap());
+        return input;
+    }
+
+    private void backupToWebDav(String url, String username, String password) {
+        Toast.makeText(this, "正在备份...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                String json = webDavBackupManager.buildBackupJson(
+                        customRecipeStore.exportNames(),
+                        weeklyPlanStore.load()
+                );
+                webDavBackupManager.upload(url, username, password, json);
+                runOnUiThread(() -> Toast.makeText(this, "WebDAV备份成功", Toast.LENGTH_LONG).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> showError("备份失败", e.getMessage()));
+            }
+        }).start();
+    }
+
+    private void confirmRestoreFromWebDav(String url, String username, String password, AlertDialog settingsDialog) {
+        new AlertDialog.Builder(this)
+                .setTitle("确认恢复")
+                .setMessage("恢复会覆盖本机已保存的“我会做的菜”和“本周菜单”。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("恢复", (dialog, which) -> restoreFromWebDav(url, username, password, settingsDialog))
+                .show();
+    }
+
+    private void restoreFromWebDav(String url, String username, String password, AlertDialog settingsDialog) {
+        Toast.makeText(this, "正在恢复...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                String raw = webDavBackupManager.download(url, username, password);
+                WebDavBackupManager.BackupData data = webDavBackupManager.parseBackupJson(raw);
+                customRecipeStore.importNames(data.customDishNames);
+                weeklyPlanStore.save(data.weeklyPlan);
+                runOnUiThread(() -> {
+                    reloadRecipes();
+                    setContentView(buildHome());
+                    renderRecipes();
+                    settingsDialog.dismiss();
+                    Toast.makeText(this, "WebDAV恢复成功", Toast.LENGTH_LONG).show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> showError("恢复失败", e.getMessage()));
+            }
+        }).start();
+    }
+
+    private void showError(String title, String message) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message == null ? "请检查地址、账号、密码和网络。" : message)
+                .setPositiveButton("知道了", null)
+                .show();
+    }
+
     private void generateWeeklyPlan() {
         List<Recipe> source = customRecipeStore.loadRecipes();
         if (source.isEmpty()) {
@@ -494,6 +633,16 @@ public class MainActivity extends Activity {
         button.setTextSize(15);
         button.setTextColor(color(0xFFFFFFFF));
         button.setBackground(roundedBackground(0xFF2D8C73, 8, 0xFF2D8C73));
+        return button;
+    }
+
+    private Button outlineButton(String label) {
+        Button button = new Button(this);
+        button.setAllCaps(false);
+        button.setText(label);
+        button.setTextSize(15);
+        button.setTextColor(color(0xFF2D8C73));
+        button.setBackground(roundedBackground(0xFFFFFFFF, 8, 0xFF2D8C73));
         return button;
     }
 
