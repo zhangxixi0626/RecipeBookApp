@@ -18,6 +18,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.List;
 
@@ -65,7 +66,7 @@ public class MainActivity extends Activity {
         TextView title = text("一周吃什么", 30, 0xFF26211E, true);
         root.addView(title);
 
-        TextView subtitle = text("从你会做的菜里自动排好 7 天菜单，每天 6 个菜，也可以手动改。", 15, 0xFF776B62, false);
+        TextView subtitle = text("从你会做的菜里自动排好 7 天菜单，每天 6 个菜。今天自动展开：" + PLAN_DAYS[currentDayIndex()] + "。", 15, 0xFF776B62, false);
         subtitle.setPadding(0, dp(4), 0, dp(18));
         root.addView(subtitle);
 
@@ -251,20 +252,21 @@ public class MainActivity extends Activity {
         }
 
         for (int slot = 0; slot < PLAN_SLOTS.length; slot++) {
+            final int currentSlot = slot;
             LinearLayout row = new LinearLayout(this);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(0, dp(8), 0, 0);
 
-            TextView slotLabel = text(PLAN_SLOTS[slot], 13, 0xFF776B62, true);
+            TextView slotLabel = text(PLAN_SLOTS[currentSlot], 13, 0xFF776B62, true);
             row.addView(slotLabel, new LinearLayout.LayoutParams(dp(52), LinearLayout.LayoutParams.WRAP_CONTENT));
 
-            String dish = planDish(plan, dayIndex, slot);
+            String dish = planDish(plan, dayIndex, currentSlot);
             TextView dishText = text(dish.isEmpty() ? "待安排" : dish, 15, dish.isEmpty() ? 0xFFAAA19A : 0xFF26211E, false);
             row.addView(dishText, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
             Button change = chip("换", false);
             change.setMinHeight(dp(34));
-            change.setOnClickListener(v -> showChangePlanDishDialog(dayIndex, slot, normalizePlan(weeklyPlanStore.load())));
+            change.setOnClickListener(v -> showChangePlanDishDialog(dayIndex, currentSlot, normalizePlan(weeklyPlanStore.load())));
             row.addView(change, new LinearLayout.LayoutParams(dp(58), dp(36)));
             day.addView(row);
         }
@@ -815,8 +817,30 @@ public class MainActivity extends Activity {
     }
 
     private void resetPlanExpansion() {
+        int today = currentDayIndex();
         for (int i = 0; i < expandedDays.length; i++) {
-            expandedDays[i] = i == 0;
+            expandedDays[i] = i == today;
+        }
+    }
+
+    private int currentDayIndex() {
+        int dayOfWeek = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
+        switch (dayOfWeek) {
+            case Calendar.MONDAY:
+                return 0;
+            case Calendar.TUESDAY:
+                return 1;
+            case Calendar.WEDNESDAY:
+                return 2;
+            case Calendar.THURSDAY:
+                return 3;
+            case Calendar.FRIDAY:
+                return 4;
+            case Calendar.SATURDAY:
+                return 5;
+            case Calendar.SUNDAY:
+            default:
+                return 6;
         }
     }
 
