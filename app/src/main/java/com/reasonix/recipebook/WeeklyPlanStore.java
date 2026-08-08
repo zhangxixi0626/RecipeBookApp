@@ -34,9 +34,7 @@ public class WeeklyPlanStore {
             JSONArray array = new JSONArray(raw);
             for (int i = 0; i < array.length(); i++) {
                 String dish = array.optString(i).trim();
-                if (!dish.isEmpty()) {
-                    dishes.add(dish);
-                }
+                dishes.add(dish);
             }
         } catch (JSONException ignored) {
         }

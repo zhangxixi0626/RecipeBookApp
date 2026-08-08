@@ -22,6 +22,10 @@ import java.util.Collections;
 import java.util.List;
 
 public class MainActivity extends Activity {
+    private static final String[] PLAN_DAYS = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
+    private static final String[] PLAN_SLOTS = {"荤菜1", "荤菜2", "素菜1", "素菜2", "汤羹", "主食"};
+    private static final int PLAN_SIZE = PLAN_DAYS.length * PLAN_SLOTS.length;
+
     private List<Recipe> recipes;
     private FavoriteStore favoriteStore;
     private CustomRecipeStore customRecipeStore;
@@ -56,12 +60,43 @@ public class MainActivity extends Activity {
         root.setPadding(dp(18), dp(22), dp(18), dp(26));
         scroll.addView(root);
 
-        TextView title = text("家常菜谱", 30, 0xFF26211E, true);
+        TextView title = text("一周吃什么", 30, 0xFF26211E, true);
         root.addView(title);
 
-        TextView subtitle = text("按食材、时间和口味快速找到今晚吃什么", 15, 0xFF776B62, false);
+        TextView subtitle = text("从你会做的菜里自动排好 7 天菜单，每天 6 个菜，也可以手动改。", 15, 0xFF776B62, false);
         subtitle.setPadding(0, dp(4), 0, dp(18));
         root.addView(subtitle);
+
+        Button weeklyPlan = greenButton("随机生成一周菜单");
+        weeklyPlan.setOnClickListener(v -> generateWeeklyPlan());
+        root.addView(weeklyPlan);
+
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button addRecipe = primaryButton("添加菜名");
+        addRecipe.setOnClickListener(v -> showAddRecipeDialog());
+        actionRow.addView(addRecipe, new LinearLayout.LayoutParams(0, dp(46), 1));
+
+        Button settings = outlineButton("设置");
+        settings.setOnClickListener(v -> showSettingsDialog());
+        LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(0, dp(46), 1);
+        settingsParams.setMargins(dp(10), 0, 0, 0);
+        actionRow.addView(settings, settingsParams);
+        root.addView(actionRow, topMargin(dp(10)));
+
+        root.addView(planSummaryCard(), topMargin(dp(12)));
+        root.addView(savedWeeklyPlanCard(), topMargin(dp(12)));
+
+        LinearLayout libraryHeader = new LinearLayout(this);
+        libraryHeader.setGravity(Gravity.CENTER_VERTICAL);
+        libraryHeader.setPadding(0, dp(20), 0, dp(8));
+        TextView libraryTitle = text("我会做的菜", 20, 0xFF26211E, true);
+        libraryHeader.addView(libraryTitle, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        countText = text("", 14, 0xFF776B62, false);
+        libraryHeader.addView(countText);
+        root.addView(libraryHeader);
 
         searchInput = new EditText(this);
         searchInput.setHint("搜索菜名、食材、标签");
@@ -76,35 +111,7 @@ public class MainActivity extends Activity {
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { renderRecipes(); }
             @Override public void afterTextChanged(Editable s) { }
         });
-
-        Button addRecipe = primaryButton("添加我会做的菜");
-        addRecipe.setOnClickListener(v -> showAddRecipeDialog());
-        root.addView(addRecipe, topMargin(dp(12)));
-
-        Button weeklyPlan = greenButton("随机生成一周菜单");
-        weeklyPlan.setOnClickListener(v -> generateWeeklyPlan());
-        root.addView(weeklyPlan, topMargin(dp(10)));
-
-        Button settings = outlineButton("设置与备份");
-        settings.setOnClickListener(v -> showSettingsDialog());
-        root.addView(settings, topMargin(dp(10)));
-
-        View savedPlan = savedWeeklyPlanCard();
-        if (savedPlan != null) {
-            root.addView(savedPlan, topMargin(dp(12)));
-        }
-
         root.addView(categoryBar());
-        root.addView(recommendationCard());
-
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(0, dp(18), 0, dp(8));
-        TextView section = text("菜谱列表", 20, 0xFF26211E, true);
-        header.addView(section, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        countText = text("", 14, 0xFF776B62, false);
-        header.addView(countText);
-        root.addView(header);
 
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -112,23 +119,48 @@ public class MainActivity extends Activity {
         return scroll;
     }
 
-    private View savedWeeklyPlanCard() {
-        List<String> plan = weeklyPlanStore.load();
-        if (plan.size() != 7) {
-            return null;
-        }
-
+    private View planSummaryCard() {
         LinearLayout card = card();
-        TextView label = text("本周菜单", 18, 0xFF26211E, true);
+        card.setBackground(roundedBackground(0xFFFFF0DD, 8, 0xFFFFD0A3));
+
+        TextView label = text("本周计划", 13, 0xFFA93624, true);
         card.addView(label);
 
-        TextView dishes = text(weeklyPlanText(plan), 15, 0xFF5B514B, false);
-        dishes.setPadding(0, dp(8), 0, 0);
-        card.addView(dishes);
+        int customCount = customRecipeStore.exportNames().size();
+        List<String> savedPlan = weeklyPlanStore.load();
+        String summary = "菜库：" + customCount + " 道自定义菜 · 本周：" + filledPlanCount(savedPlan) + "/" + PLAN_SIZE + " 个位置";
+        TextView value = text(summary, 18, 0xFF26211E, true);
+        value.setPadding(0, dp(6), 0, dp(4));
+        card.addView(value);
 
-        Button edit = greenButton("手动更改菜单");
+        TextView hint = text("先把你会做的菜加进菜库，再点随机生成。菜不够时会自动重复，生成后仍可逐格改。", 14, 0xFF5B514B, false);
+        card.addView(hint);
+        return card;
+    }
+
+    private View savedWeeklyPlanCard() {
+        List<String> plan = normalizePlan(weeklyPlanStore.load());
+        LinearLayout card = card();
+
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text("一周菜单表", 20, 0xFF26211E, true);
+        top.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        Button edit = chip("手动改", false);
         edit.setOnClickListener(v -> showEditWeeklyPlanDialog(plan));
-        card.addView(edit, topMargin(dp(12)));
+        top.addView(edit);
+        card.addView(top);
+
+        if (filledPlanCount(plan) == 0) {
+            TextView empty = text("还没有生成菜单。点上面的“随机生成一周菜单”，这里会出现 7 天 × 6 道菜。", 15, 0xFF776B62, false);
+            empty.setPadding(0, dp(12), 0, 0);
+            card.addView(empty);
+            return card;
+        }
+
+        for (int day = 0; day < PLAN_DAYS.length; day++) {
+            card.addView(dayPlanView(plan, day), topMargin(day == 0 ? dp(12) : dp(10)));
+        }
         return card;
     }
 
@@ -178,6 +210,36 @@ public class MainActivity extends Activity {
         open.setOnClickListener(v -> showRecipe(recipe));
         card.addView(open, topMargin(dp(12)));
         return card;
+    }
+
+    private View dayPlanView(List<String> plan, int dayIndex) {
+        LinearLayout day = new LinearLayout(this);
+        day.setOrientation(LinearLayout.VERTICAL);
+        day.setPadding(dp(12), dp(10), dp(12), dp(10));
+        day.setBackground(roundedBackground(dayIndex % 2 == 0 ? 0xFFFFFCF7 : 0xFFF7FBF7, 8, 0xFFE8DDD1));
+
+        TextView dayTitle = text(PLAN_DAYS[dayIndex], 17, 0xFF26211E, true);
+        day.addView(dayTitle);
+
+        for (int slot = 0; slot < PLAN_SLOTS.length; slot++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(8), 0, 0);
+
+            TextView slotLabel = text(PLAN_SLOTS[slot], 13, 0xFF776B62, true);
+            row.addView(slotLabel, new LinearLayout.LayoutParams(dp(52), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+            String dish = planDish(plan, dayIndex, slot);
+            TextView dishText = text(dish.isEmpty() ? "待安排" : dish, 15, dish.isEmpty() ? 0xFFAAA19A : 0xFF26211E, false);
+            row.addView(dishText, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+            Button change = chip("换", false);
+            change.setMinHeight(dp(34));
+            change.setOnClickListener(v -> showChangePlanDishDialog(dayIndex, slot, normalizePlan(weeklyPlanStore.load())));
+            row.addView(change, new LinearLayout.LayoutParams(dp(58), dp(36)));
+            day.addView(row);
+        }
+        return day;
     }
 
     private void renderRecipes() {
@@ -473,25 +535,25 @@ public class MainActivity extends Activity {
             source = recipes;
         }
 
-        List<String> plan = pickSevenDishes(source);
+        List<String> plan = pickPlanDishes(source, PLAN_SIZE);
         weeklyPlanStore.save(plan);
         setContentView(buildHome());
         renderRecipes();
         showWeeklyPlanDialog(plan);
     }
 
-    private List<String> pickSevenDishes(List<Recipe> source) {
+    private List<String> pickPlanDishes(List<Recipe> source, int targetCount) {
         List<String> pool = new ArrayList<>();
         for (Recipe recipe : source) {
             pool.add(recipe.name);
         }
 
         List<String> plan = new ArrayList<>();
-        while (plan.size() < 7) {
+        while (plan.size() < targetCount) {
             Collections.shuffle(pool);
             for (String dish : pool) {
                 plan.add(dish);
-                if (plan.size() == 7) {
+                if (plan.size() == targetCount) {
                     break;
                 }
             }
@@ -500,11 +562,11 @@ public class MainActivity extends Activity {
     }
 
     private void showWeeklyPlanDialog(List<String> plan) {
-        TextView content = text(weeklyPlanText(plan), 17, 0xFF26211E, false);
+        TextView content = text(weeklyPlanText(normalizePlan(plan)), 15, 0xFF26211E, false);
         content.setPadding(dp(20), dp(8), dp(20), dp(6));
 
         new AlertDialog.Builder(this)
-                .setTitle("一周菜单已生成")
+                .setTitle("已生成 7 天菜单")
                 .setView(content)
                 .setNegativeButton("关闭", null)
                 .setNeutralButton("手动更改", (dialog, which) -> showEditWeeklyPlanDialog(plan))
@@ -513,8 +575,8 @@ public class MainActivity extends Activity {
     }
 
     private void showEditWeeklyPlanDialog(List<String> currentPlan) {
-        String[] days = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
         List<EditText> inputs = new ArrayList<>();
+        List<String> plan = normalizePlan(currentPlan);
 
         ScrollView scroll = new ScrollView(this);
         LinearLayout content = new LinearLayout(this);
@@ -522,25 +584,27 @@ public class MainActivity extends Activity {
         content.setPadding(dp(18), dp(8), dp(18), dp(4));
         scroll.addView(content);
 
-        for (int i = 0; i < days.length; i++) {
-            TextView label = text(days[i], 14, 0xFF776B62, true);
-            label.setPadding(0, i == 0 ? 0 : dp(10), 0, dp(4));
+        for (int day = 0; day < PLAN_DAYS.length; day++) {
+            TextView label = text(PLAN_DAYS[day], 16, 0xFF26211E, true);
+            label.setPadding(0, day == 0 ? 0 : dp(14), 0, dp(4));
             content.addView(label);
 
-            EditText input = new EditText(this);
-            input.setSingleLine(true);
-            input.setText(i < currentPlan.size() ? currentPlan.get(i) : "");
-            input.setHint("输入菜名");
-            input.setTextSize(16);
-            input.setPadding(dp(12), 0, dp(12), 0);
-            input.setMinHeight(dp(46));
-            input.setBackground(roundedBackground(0xFFFFFFFF, 8, 0xFFE8DDD1));
-            content.addView(input, matchWrap());
-            inputs.add(input);
+            for (int slot = 0; slot < PLAN_SLOTS.length; slot++) {
+                EditText input = new EditText(this);
+                input.setSingleLine(true);
+                input.setText(planDish(plan, day, slot));
+                input.setHint(PLAN_SLOTS[slot]);
+                input.setTextSize(15);
+                input.setPadding(dp(12), 0, dp(12), 0);
+                input.setMinHeight(dp(44));
+                input.setBackground(roundedBackground(0xFFFFFFFF, 8, 0xFFE8DDD1));
+                content.addView(input, topMargin(slot == 0 ? dp(4) : dp(8)));
+                inputs.add(input);
+            }
         }
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("手动更改本周菜单")
+                .setTitle("手动更改 42 个菜")
                 .setView(scroll)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", null)
@@ -550,8 +614,7 @@ public class MainActivity extends Activity {
             for (EditText input : inputs) {
                 String dish = input.getText().toString().trim();
                 if (dish.isEmpty()) {
-                    input.setError("请输入菜名");
-                    return;
+                    dish = "待安排";
                 }
                 editedPlan.add(dish);
             }
@@ -566,12 +629,125 @@ public class MainActivity extends Activity {
     }
 
     private String weeklyPlanText(List<String> plan) {
-        String[] days = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
         StringBuilder text = new StringBuilder();
-        for (int i = 0; i < days.length && i < plan.size(); i++) {
-            text.append(days[i]).append("：").append(plan.get(i)).append('\n');
+        for (int day = 0; day < PLAN_DAYS.length; day++) {
+            text.append(PLAN_DAYS[day]).append('\n');
+            for (int slot = 0; slot < PLAN_SLOTS.length; slot++) {
+                text.append(PLAN_SLOTS[slot]).append("：").append(planDish(plan, day, slot)).append('\n');
+            }
+            if (day < PLAN_DAYS.length - 1) {
+                text.append('\n');
+            }
         }
         return text.toString();
+    }
+
+    private void showChangePlanDishDialog(int dayIndex, int slotIndex, List<String> currentPlan) {
+        List<String> choices = new ArrayList<>();
+        List<Recipe> source = customRecipeStore.loadRecipes();
+        if (source.isEmpty()) {
+            source = recipes;
+        }
+        for (Recipe recipe : source) {
+            choices.add(recipe.name);
+        }
+
+        String[] items = new String[choices.size() + 1];
+        items[0] = "手动输入菜名";
+        for (int i = 0; i < choices.size(); i++) {
+            items[i + 1] = choices.get(i);
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(PLAN_DAYS[dayIndex] + " · " + PLAN_SLOTS[slotIndex])
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) {
+                        showManualPlanDishInput(dayIndex, slotIndex, currentPlan);
+                    } else {
+                        updatePlanDish(dayIndex, slotIndex, choices.get(which - 1), currentPlan);
+                    }
+                })
+                .show();
+    }
+
+    private void showManualPlanDishInput(int dayIndex, int slotIndex, List<String> currentPlan) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(planDish(currentPlan, dayIndex, slotIndex));
+        input.setHint("输入菜名");
+        input.setTextSize(16);
+        input.setPadding(dp(14), 0, dp(14), 0);
+        input.setMinHeight(dp(48));
+        input.setBackground(roundedBackground(0xFFFFFFFF, 8, 0xFFE8DDD1));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("更换菜名")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", null)
+                .create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String dish = input.getText().toString().trim();
+            if (dish.isEmpty()) {
+                input.setError("请输入菜名");
+                return;
+            }
+            updatePlanDish(dayIndex, slotIndex, dish, currentPlan);
+            dialog.dismiss();
+        }));
+        dialog.show();
+    }
+
+    private void updatePlanDish(int dayIndex, int slotIndex, String dish, List<String> currentPlan) {
+        List<String> plan = normalizePlan(currentPlan);
+        plan.set(planIndex(dayIndex, slotIndex), dish);
+        weeklyPlanStore.save(plan);
+        setContentView(buildHome());
+        renderRecipes();
+        Toast.makeText(this, "已更换为：" + dish, Toast.LENGTH_SHORT).show();
+    }
+
+    private List<String> normalizePlan(List<String> rawPlan) {
+        List<String> plan = new ArrayList<>();
+        if (rawPlan.size() == PLAN_DAYS.length) {
+            for (int day = 0; day < PLAN_DAYS.length; day++) {
+                plan.add(rawPlan.get(day));
+                for (int slot = 1; slot < PLAN_SLOTS.length; slot++) {
+                    plan.add("");
+                }
+            }
+        } else {
+            for (int i = 0; i < rawPlan.size() && i < PLAN_SIZE; i++) {
+                plan.add(rawPlan.get(i));
+            }
+        }
+        while (plan.size() < PLAN_SIZE) {
+            plan.add("");
+        }
+        return plan;
+    }
+
+    private int filledPlanCount(List<String> plan) {
+        int count = 0;
+        for (String dish : normalizePlan(plan)) {
+            String trimmed = dish.trim();
+            if (!trimmed.isEmpty() && !trimmed.equals("待安排")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private String planDish(List<String> plan, int dayIndex, int slotIndex) {
+        int index = planIndex(dayIndex, slotIndex);
+        if (index >= plan.size()) {
+            return "";
+        }
+        return plan.get(index).trim();
+    }
+
+    private int planIndex(int dayIndex, int slotIndex) {
+        return dayIndex * PLAN_SLOTS.length + slotIndex;
     }
 
     private String ingredientsText(Recipe recipe, double scale) {
