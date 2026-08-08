@@ -1,7 +1,13 @@
 package com.reasonix.recipebook;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputType;
@@ -26,6 +32,7 @@ public class MainActivity extends Activity {
     private static final String[] PLAN_DAYS = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
     private static final String[] PLAN_SLOTS = {"荤菜1", "荤菜2", "素菜1", "素菜2", "汤羹", "主食"};
     private static final int PLAN_SIZE = PLAN_DAYS.length * PLAN_SLOTS.length;
+    private static final String NOTIFICATION_CHANNEL_ID = "recipebook_updates";
 
     private List<Recipe> recipes;
     private FavoriteStore favoriteStore;
@@ -33,6 +40,8 @@ public class MainActivity extends Activity {
     private WeeklyPlanStore weeklyPlanStore;
     private WebDavSettingsStore webDavSettingsStore;
     private WebDavBackupManager webDavBackupManager;
+    private ShoppingMemoStore shoppingMemoStore;
+    private ReminderStore reminderStore;
     private LinearLayout list;
     private TextView countText;
     private EditText searchInput;
@@ -49,6 +58,9 @@ public class MainActivity extends Activity {
         weeklyPlanStore = new WeeklyPlanStore(this);
         webDavSettingsStore = new WebDavSettingsStore(this);
         webDavBackupManager = new WebDavBackupManager();
+        shoppingMemoStore = new ShoppingMemoStore(this);
+        reminderStore = new ReminderStore(this);
+        prepareNotifications();
         resetPlanExpansion();
         reloadRecipes();
         setContentView(buildHome());
@@ -78,6 +90,8 @@ public class MainActivity extends Activity {
 
         if (activeTab.equals("菜库")) {
             root.addView(libraryContent(), topMargin(dp(18)));
+        } else if (activeTab.equals("采购")) {
+            root.addView(shoppingContent(), topMargin(dp(18)));
         } else {
             root.addView(planActions(), topMargin(dp(18)));
 
@@ -213,6 +227,84 @@ public class MainActivity extends Activity {
         return content;
     }
 
+    private View shoppingContent() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text("采购备忘录", 22, 0xFF303030, true);
+        header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView count = text(shoppingMemoStore.load().size() + " 项", 14, 0xFF777777, false);
+        header.addView(count);
+        content.addView(header);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        Button add = greenButton("+  添加采购物品");
+        add.setTextSize(17);
+        add.setOnClickListener(v -> showAddShoppingItemDialog());
+        actions.addView(add, new LinearLayout.LayoutParams(0, dp(56), 1));
+
+        Button share = outlineButton("分享到备忘录");
+        share.setTextSize(15);
+        share.setOnClickListener(v -> shareShoppingMemo());
+        LinearLayout.LayoutParams shareParams = new LinearLayout.LayoutParams(0, dp(56), 0.72f);
+        shareParams.setMargins(dp(12), 0, 0, 0);
+        actions.addView(share, shareParams);
+        content.addView(actions, topMargin(dp(14)));
+
+        TextView hint = text("可提前记录要买的东西。勾一下表示已买，长按可删除。分享到备忘录会打开系统分享面板，选择手机自带备忘录即可。", 14, 0xFF777777, false);
+        hint.setPadding(0, dp(12), 0, dp(10));
+        content.addView(hint);
+
+        List<ShoppingMemoStore.ShoppingItem> items = shoppingMemoStore.load();
+        if (items.isEmpty()) {
+            LinearLayout empty = card();
+            TextView emptyText = text("还没有采购记录。比如：鸡蛋、排骨、青菜、米。", 16, 0xFF777777, false);
+            empty.addView(emptyText);
+            content.addView(empty, topMargin(dp(8)));
+            return content;
+        }
+
+        for (int i = 0; i < items.size(); i++) {
+            final int index = i;
+            content.addView(shoppingItemView(items.get(i), index), topMargin(i == 0 ? dp(4) : dp(10)));
+        }
+        return content;
+    }
+
+    private View shoppingItemView(ShoppingMemoStore.ShoppingItem item, int index) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), 0, dp(10), 0);
+        row.setBackground(roundedBackground(0xFFFFFFFF, 8, 0xFFE8E1DC));
+
+        TextView check = text(item.done ? "✓" : "□", 24, item.done ? 0xFF2D8C73 : 0xFF777777, true);
+        check.setGravity(Gravity.CENTER);
+        row.addView(check, new LinearLayout.LayoutParams(dp(40), dp(56)));
+
+        TextView name = text(item.name, 17, item.done ? 0xFF8A8A8A : 0xFF202020, true);
+        row.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView delete = text("删除", 14, 0xFFE52B31, false);
+        delete.setGravity(Gravity.CENTER);
+        row.addView(delete, new LinearLayout.LayoutParams(dp(54), dp(56)));
+        row.setOnClickListener(v -> {
+            addReminder((item.done ? "取消已买：" : "标记已买：") + item.name);
+            shoppingMemoStore.toggle(index);
+            activeTab = "采购";
+            setContentView(buildHome());
+            renderRecipes();
+        });
+        row.setOnLongClickListener(v -> {
+            removeShoppingItem(index);
+            return true;
+        });
+        delete.setOnClickListener(v -> removeShoppingItem(index));
+        return row;
+    }
+
     private View bottomNavigation() {
         LinearLayout nav = new LinearLayout(this);
         nav.setGravity(Gravity.CENTER);
@@ -228,7 +320,11 @@ public class MainActivity extends Activity {
             setContentView(buildHome());
             renderRecipes();
         }), new LinearLayout.LayoutParams(0, dp(68), 1));
-        nav.addView(navItem("□", "采购", false, () -> Toast.makeText(this, "购物清单后续开发", Toast.LENGTH_SHORT).show()), new LinearLayout.LayoutParams(0, dp(68), 1));
+        nav.addView(navItem("□", "采购", activeTab.equals("采购"), () -> {
+            activeTab = "采购";
+            setContentView(buildHome());
+            renderRecipes();
+        }), new LinearLayout.LayoutParams(0, dp(68), 1));
         nav.addView(navItem("⚙", "设置", false, this::showSettingsDialog), new LinearLayout.LayoutParams(0, dp(68), 1));
         return nav;
     }
@@ -379,8 +475,8 @@ public class MainActivity extends Activity {
         TextView edit = text("✎", 22, 0xFF666666, false);
         edit.setGravity(Gravity.CENTER);
         cell.addView(edit, new LinearLayout.LayoutParams(dp(28), dp(44)));
-        cell.setOnClickListener(v -> showChangePlanDishDialog(dayIndex, slotIndex, normalizePlan(weeklyPlanStore.load())));
-        edit.setOnClickListener(v -> showChangePlanDishDialog(dayIndex, slotIndex, normalizePlan(weeklyPlanStore.load())));
+        cell.setOnClickListener(v -> showManualPlanDishInput(dayIndex, slotIndex, normalizePlan(weeklyPlanStore.load())));
+        edit.setOnClickListener(v -> showManualPlanDishInput(dayIndex, slotIndex, normalizePlan(weeklyPlanStore.load())));
         return cell;
     }
 
@@ -598,6 +694,7 @@ public class MainActivity extends Activity {
                 return;
             }
             customRecipeStore.addRecipeName(name);
+            addReminder("新增菜名：" + name);
             reloadRecipes();
             selectedCategory = "自定义";
             setContentView(buildHome());
@@ -608,6 +705,141 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void showAddShoppingItemDialog() {
+        EditText input = new EditText(this);
+        input.setHint("例如：鸡蛋、排骨、青菜");
+        input.setSingleLine(true);
+        input.setTextSize(16);
+        input.setPadding(dp(14), 0, dp(14), 0);
+        input.setMinHeight(dp(48));
+        input.setBackground(roundedBackground(0xFFFFFFFF, 8, 0xFFE8DDD1));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("添加采购物品")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", null)
+                .create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String item = input.getText().toString().trim();
+            if (item.isEmpty()) {
+                input.setError("请输入物品");
+                return;
+            }
+            shoppingMemoStore.add(item);
+            addReminder("新增采购物品：" + item);
+            activeTab = "采购";
+            setContentView(buildHome());
+            renderRecipes();
+            dialog.dismiss();
+        }));
+        dialog.show();
+    }
+
+    private void removeShoppingItem(int index) {
+        List<ShoppingMemoStore.ShoppingItem> items = shoppingMemoStore.load();
+        if (index < 0 || index >= items.size()) {
+            return;
+        }
+        String name = items.get(index).name;
+        shoppingMemoStore.remove(index);
+        addReminder("删除采购物品：" + name);
+        activeTab = "采购";
+        setContentView(buildHome());
+        renderRecipes();
+    }
+
+    private void shareShoppingMemo() {
+        List<ShoppingMemoStore.ShoppingItem> items = shoppingMemoStore.load();
+        if (items.isEmpty()) {
+            Toast.makeText(this, "采购备忘录还是空的", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        StringBuilder builder = new StringBuilder("采购备忘录\n");
+        for (ShoppingMemoStore.ShoppingItem item : items) {
+            builder.append(item.done ? "[已买] " : "[待买] ").append(item.name).append('\n');
+        }
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_SUBJECT, "采购备忘录");
+        intent.putExtra(Intent.EXTRA_TEXT, builder.toString());
+        startActivity(Intent.createChooser(intent, "分享到备忘录"));
+    }
+
+    private View remindersPanel() {
+        LinearLayout panel = card();
+        panel.setBackground(roundedBackground(0xFFFFF8F8, 8, 0xFFFFD7D7));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = text("最近提醒", 17, 0xFFE52B31, true);
+        header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView clear = text("清空", 14, 0xFF777777, false);
+        clear.setGravity(Gravity.CENTER);
+        clear.setOnClickListener(v -> {
+            reminderStore.clear();
+            Toast.makeText(this, "提醒已清空", Toast.LENGTH_SHORT).show();
+        });
+        header.addView(clear);
+        panel.addView(header);
+
+        List<String> messages = reminderStore.load();
+        if (messages.isEmpty()) {
+            TextView empty = text("还没有提醒。修改菜单或采购备忘录后，这里会记录变化。", 14, 0xFF777777, false);
+            empty.setPadding(0, dp(8), 0, 0);
+            panel.addView(empty);
+            return panel;
+        }
+
+        int limit = Math.min(5, messages.size());
+        for (int i = 0; i < limit; i++) {
+            TextView message = text(messages.get(i), 14, 0xFF444444, false);
+            message.setPadding(0, dp(8), 0, 0);
+            panel.addView(message);
+        }
+        return panel;
+    }
+
+    private void addReminder(String message) {
+        reminderStore.add(message);
+        sendLocalNotification("菜谱有新变化", message);
+    }
+
+    private void prepareNotifications() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    NOTIFICATION_CHANNEL_ID,
+                    "菜谱提醒",
+                    NotificationManager.IMPORTANCE_DEFAULT
+            );
+            channel.setDescription("菜单和采购备忘录变化提醒");
+            NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (manager != null) {
+                manager.createNotificationChannel(channel);
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
+        }
+    }
+
+    private void sendLocalNotification(String title, String message) {
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager == null) {
+            return;
+        }
+
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+                : new Notification.Builder(this);
+        builder.setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(new Notification.BigTextStyle().bigText(message))
+                .setAutoCancel(true);
+        manager.notify((int) (System.currentTimeMillis() % Integer.MAX_VALUE), builder.build());
+    }
+
     private void showSettingsDialog() {
         ScrollView scroll = new ScrollView(this);
         LinearLayout content = new LinearLayout(this);
@@ -615,9 +847,11 @@ public class MainActivity extends Activity {
         content.setPadding(dp(18), dp(8), dp(18), dp(6));
         scroll.addView(content);
 
-        TextView intro = text("建议设置项：WebDAV备份、每日菜数、是否允许重复、菜库分类、数据恢复。当前先实现 WebDAV 备份和恢复。", 14, 0xFF776B62, false);
+        TextView intro = text("还建议继续加入：菜谱图片、按家庭成员偏好排菜、购物清单自动汇总、账号同步、厨师端通知、营养和预算统计。当前先实现采购备忘录、应用内提醒和本机通知基础。", 14, 0xFF776B62, false);
         intro.setPadding(0, 0, 0, dp(12));
         content.addView(intro);
+
+        content.addView(remindersPanel(), bottomMargin(dp(12)));
 
         EditText serverUrlInput = labeledInput(content, "WebDAV服务器地址", "例如：https://example.com/dav/");
         serverUrlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
@@ -753,6 +987,7 @@ public class MainActivity extends Activity {
 
         List<String> plan = pickPlanDishes(source, PLAN_SIZE);
         weeklyPlanStore.save(plan);
+        addReminder("整周菜单已重新生成");
         resetPlanExpansion();
         setContentView(buildHome());
         renderRecipes();
@@ -803,6 +1038,7 @@ public class MainActivity extends Activity {
         }
         expandedDays[dayIndex] = true;
         weeklyPlanStore.save(plan);
+        addReminder(PLAN_DAYS[dayIndex] + "菜单已重新生成");
         setContentView(buildHome());
         renderRecipes();
         Toast.makeText(this, PLAN_DAYS[dayIndex] + "已重新生成", Toast.LENGTH_SHORT).show();
@@ -842,6 +1078,7 @@ public class MainActivity extends Activity {
             }
             expandedDays[dayIndex] = true;
             weeklyPlanStore.save(plan);
+            addReminder(PLAN_DAYS[dayIndex] + "菜单已手动编辑");
             setContentView(buildHome());
             renderRecipes();
             Toast.makeText(this, PLAN_DAYS[dayIndex] + "已保存", Toast.LENGTH_SHORT).show();
@@ -896,6 +1133,7 @@ public class MainActivity extends Activity {
             }
 
             weeklyPlanStore.save(editedPlan);
+            addReminder("整周菜单已手动编辑");
             setContentView(buildHome());
             renderRecipes();
             Toast.makeText(this, "本周菜单已保存", Toast.LENGTH_SHORT).show();
@@ -916,34 +1154,6 @@ public class MainActivity extends Activity {
             }
         }
         return text.toString();
-    }
-
-    private void showChangePlanDishDialog(int dayIndex, int slotIndex, List<String> currentPlan) {
-        List<String> choices = new ArrayList<>();
-        List<Recipe> source = customRecipeStore.loadRecipes();
-        if (source.isEmpty()) {
-            source = recipes;
-        }
-        for (Recipe recipe : source) {
-            choices.add(recipe.name);
-        }
-
-        String[] items = new String[choices.size() + 1];
-        items[0] = "手动输入菜名";
-        for (int i = 0; i < choices.size(); i++) {
-            items[i + 1] = choices.get(i);
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle(PLAN_DAYS[dayIndex] + " · " + PLAN_SLOTS[slotIndex])
-                .setItems(items, (dialog, which) -> {
-                    if (which == 0) {
-                        showManualPlanDishInput(dayIndex, slotIndex, currentPlan);
-                    } else {
-                        updatePlanDish(dayIndex, slotIndex, choices.get(which - 1), currentPlan);
-                    }
-                })
-                .show();
     }
 
     private void showManualPlanDishInput(int dayIndex, int slotIndex, List<String> currentPlan) {
@@ -978,6 +1188,7 @@ public class MainActivity extends Activity {
         List<String> plan = normalizePlan(currentPlan);
         plan.set(planIndex(dayIndex, slotIndex), dish);
         weeklyPlanStore.save(plan);
+        addReminder(PLAN_DAYS[dayIndex] + " 菜" + (slotIndex + 1) + "改为：" + dish);
         setContentView(buildHome());
         renderRecipes();
         Toast.makeText(this, "已更换为：" + dish, Toast.LENGTH_SHORT).show();
