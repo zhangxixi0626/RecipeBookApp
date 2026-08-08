@@ -342,9 +342,13 @@ public class MainActivity extends Activity {
         intro.setPadding(0, 0, 0, dp(12));
         content.addView(intro);
 
-        EditText urlInput = labeledInput(content, "WebDAV地址", "例如：https://example.com/dav/recipebook-backup.json");
-        urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        urlInput.setText(webDavSettingsStore.getUrl());
+        EditText serverUrlInput = labeledInput(content, "WebDAV服务器地址", "例如：https://example.com/dav/");
+        serverUrlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        serverUrlInput.setText(webDavSettingsStore.getServerUrl());
+
+        EditText targetPathInput = labeledInput(content, "目标地址", "例如：recipebook/recipebook-backup.json");
+        targetPathInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        targetPathInput.setText(webDavSettingsStore.getTargetPath());
 
         EditText usernameInput = labeledInput(content, "账号", "WebDAV账号，可为空");
         usernameInput.setText(webDavSettingsStore.getUsername());
@@ -353,7 +357,7 @@ public class MainActivity extends Activity {
         passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         passwordInput.setText(webDavSettingsStore.getPassword());
 
-        TextView hint = text("为保护数据，WebDAV地址需要使用 https://。如果地址以 / 结尾，会自动保存为 recipebook-backup.json。备份内容包括：我会做的菜、本周菜单。", 13, 0xFF776B62, false);
+        TextView hint = text("为保护数据，WebDAV服务器地址需要使用 https://。目标地址是备份文件在网盘里的路径，留空会使用 recipebook-backup.json。备份内容包括：我会做的菜、本周菜单。", 13, 0xFF776B62, false);
         hint.setPadding(0, dp(10), 0, dp(12));
         content.addView(hint);
 
@@ -369,23 +373,25 @@ public class MainActivity extends Activity {
                 .create();
 
         backup.setOnClickListener(v -> {
-            String url = urlInput.getText().toString().trim();
-            if (url.isEmpty()) {
-                urlInput.setError("请输入WebDAV地址");
+            String serverUrl = serverUrlInput.getText().toString().trim();
+            String targetPath = targetPathInput.getText().toString().trim();
+            if (serverUrl.isEmpty()) {
+                serverUrlInput.setError("请输入WebDAV服务器地址");
                 return;
             }
-            webDavSettingsStore.save(url, usernameInput.getText().toString(), passwordInput.getText().toString());
-            backupToWebDav(url, usernameInput.getText().toString(), passwordInput.getText().toString());
+            webDavSettingsStore.save(serverUrl, targetPath, usernameInput.getText().toString(), passwordInput.getText().toString());
+            backupToWebDav(serverUrl, targetPath, usernameInput.getText().toString(), passwordInput.getText().toString());
         });
 
         restore.setOnClickListener(v -> {
-            String url = urlInput.getText().toString().trim();
-            if (url.isEmpty()) {
-                urlInput.setError("请输入WebDAV地址");
+            String serverUrl = serverUrlInput.getText().toString().trim();
+            String targetPath = targetPathInput.getText().toString().trim();
+            if (serverUrl.isEmpty()) {
+                serverUrlInput.setError("请输入WebDAV服务器地址");
                 return;
             }
-            webDavSettingsStore.save(url, usernameInput.getText().toString(), passwordInput.getText().toString());
-            confirmRestoreFromWebDav(url, usernameInput.getText().toString(), passwordInput.getText().toString(), dialog);
+            webDavSettingsStore.save(serverUrl, targetPath, usernameInput.getText().toString(), passwordInput.getText().toString());
+            confirmRestoreFromWebDav(serverUrl, targetPath, usernameInput.getText().toString(), passwordInput.getText().toString(), dialog);
         });
 
         dialog.show();
@@ -407,7 +413,7 @@ public class MainActivity extends Activity {
         return input;
     }
 
-    private void backupToWebDav(String url, String username, String password) {
+    private void backupToWebDav(String serverUrl, String targetPath, String username, String password) {
         Toast.makeText(this, "正在备份...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
@@ -415,7 +421,7 @@ public class MainActivity extends Activity {
                         customRecipeStore.exportNames(),
                         weeklyPlanStore.load()
                 );
-                webDavBackupManager.upload(url, username, password, json);
+                webDavBackupManager.upload(serverUrl, targetPath, username, password, json);
                 runOnUiThread(() -> Toast.makeText(this, "WebDAV备份成功", Toast.LENGTH_LONG).show());
             } catch (Exception e) {
                 runOnUiThread(() -> showError("备份失败", e.getMessage()));
@@ -423,20 +429,20 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void confirmRestoreFromWebDav(String url, String username, String password, AlertDialog settingsDialog) {
+    private void confirmRestoreFromWebDav(String serverUrl, String targetPath, String username, String password, AlertDialog settingsDialog) {
         new AlertDialog.Builder(this)
                 .setTitle("确认恢复")
                 .setMessage("恢复会覆盖本机已保存的“我会做的菜”和“本周菜单”。")
                 .setNegativeButton("取消", null)
-                .setPositiveButton("恢复", (dialog, which) -> restoreFromWebDav(url, username, password, settingsDialog))
+                .setPositiveButton("恢复", (dialog, which) -> restoreFromWebDav(serverUrl, targetPath, username, password, settingsDialog))
                 .show();
     }
 
-    private void restoreFromWebDav(String url, String username, String password, AlertDialog settingsDialog) {
+    private void restoreFromWebDav(String serverUrl, String targetPath, String username, String password, AlertDialog settingsDialog) {
         Toast.makeText(this, "正在恢复...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
-                String raw = webDavBackupManager.download(url, username, password);
+                String raw = webDavBackupManager.download(serverUrl, targetPath, username, password);
                 WebDavBackupManager.BackupData data = webDavBackupManager.parseBackupJson(raw);
                 customRecipeStore.importNames(data.customDishNames);
                 weeklyPlanStore.save(data.weeklyPlan);

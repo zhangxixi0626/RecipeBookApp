@@ -44,8 +44,8 @@ public class WebDavBackupManager {
         );
     }
 
-    public void upload(String url, String username, String password, String json) throws IOException {
-        HttpURLConnection connection = openConnection(url, username, password, "PUT");
+    public void upload(String serverUrl, String targetPath, String username, String password, String json) throws IOException {
+        HttpURLConnection connection = openConnection(serverUrl, targetPath, username, password, "PUT");
         connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         connection.setDoOutput(true);
         try (OutputStream output = connection.getOutputStream();
@@ -59,8 +59,8 @@ public class WebDavBackupManager {
         connection.disconnect();
     }
 
-    public String download(String url, String username, String password) throws IOException {
-        HttpURLConnection connection = openConnection(url, username, password, "GET");
+    public String download(String serverUrl, String targetPath, String username, String password) throws IOException {
+        HttpURLConnection connection = openConnection(serverUrl, targetPath, username, password, "GET");
         int code = connection.getResponseCode();
         if (code < 200 || code >= 300) {
             throw new IOException("WebDAV 恢复失败，服务器返回：" + code);
@@ -70,19 +70,26 @@ public class WebDavBackupManager {
         return result;
     }
 
-    public String normalizeBackupUrl(String rawUrl) {
-        String url = rawUrl.trim();
-        if (!url.startsWith("https://")) {
-            throw new IllegalArgumentException("WebDAV地址需要使用 https://");
+    public String normalizeBackupUrl(String rawServerUrl, String rawTargetPath) {
+        String serverUrl = rawServerUrl.trim();
+        String targetPath = rawTargetPath.trim();
+        if (!serverUrl.startsWith("https://")) {
+            throw new IllegalArgumentException("WebDAV服务器地址需要使用 https://");
         }
-        if (url.endsWith("/")) {
-            return url + DEFAULT_BACKUP_FILE;
+        if (targetPath.isEmpty()) {
+            targetPath = DEFAULT_BACKUP_FILE;
         }
-        return url;
+        while (targetPath.startsWith("/")) {
+            targetPath = targetPath.substring(1);
+        }
+        if (targetPath.isEmpty()) {
+            targetPath = DEFAULT_BACKUP_FILE;
+        }
+        return serverUrl.endsWith("/") ? serverUrl + targetPath : serverUrl + "/" + targetPath;
     }
 
-    private HttpURLConnection openConnection(String rawUrl, String username, String password, String method) throws IOException {
-        URL target = new URL(normalizeBackupUrl(rawUrl));
+    private HttpURLConnection openConnection(String serverUrl, String targetPath, String username, String password, String method) throws IOException {
+        URL target = new URL(normalizeBackupUrl(serverUrl, targetPath));
         HttpURLConnection connection = (HttpURLConnection) target.openConnection();
         connection.setRequestMethod(method);
         connection.setConnectTimeout(12000);
