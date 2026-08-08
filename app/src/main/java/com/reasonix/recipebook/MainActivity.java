@@ -37,6 +37,7 @@ public class MainActivity extends Activity {
     private EditText searchInput;
     private String selectedCategory = "全部";
     private int selectedServings = 2;
+    private final boolean[] expandedDays = new boolean[PLAN_DAYS.length];
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -46,6 +47,7 @@ public class MainActivity extends Activity {
         weeklyPlanStore = new WeeklyPlanStore(this);
         webDavSettingsStore = new WebDavSettingsStore(this);
         webDavBackupManager = new WebDavBackupManager();
+        resetPlanExpansion();
         reloadRecipes();
         setContentView(buildHome());
         renderRecipes();
@@ -218,8 +220,35 @@ public class MainActivity extends Activity {
         day.setPadding(dp(12), dp(10), dp(12), dp(10));
         day.setBackground(roundedBackground(dayIndex % 2 == 0 ? 0xFFFFFCF7 : 0xFFF7FBF7, 8, 0xFFE8DDD1));
 
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
         TextView dayTitle = text(PLAN_DAYS[dayIndex], 17, 0xFF26211E, true);
-        day.addView(dayTitle);
+        header.addView(dayTitle, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView count = text(dayFilledCount(plan, dayIndex) + "/" + PLAN_SLOTS.length, 13, 0xFF776B62, true);
+        count.setGravity(Gravity.CENTER);
+        header.addView(count, new LinearLayout.LayoutParams(dp(44), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        Button toggle = chip(expandedDays[dayIndex] ? "收起" : "展开", false);
+        header.addView(toggle, new LinearLayout.LayoutParams(dp(72), dp(36)));
+
+        View.OnClickListener toggleDay = v -> {
+            expandedDays[dayIndex] = !expandedDays[dayIndex];
+            setContentView(buildHome());
+            renderRecipes();
+        };
+        header.setOnClickListener(toggleDay);
+        toggle.setOnClickListener(toggleDay);
+        day.addView(header);
+
+        if (!expandedDays[dayIndex]) {
+            TextView preview = text(dayPreviewText(plan, dayIndex), 14, 0xFF776B62, false);
+            preview.setSingleLine(true);
+            preview.setPadding(0, dp(8), 0, 0);
+            day.addView(preview);
+            return day;
+        }
 
         for (int slot = 0; slot < PLAN_SLOTS.length; slot++) {
             LinearLayout row = new LinearLayout(this);
@@ -510,6 +539,7 @@ public class MainActivity extends Activity {
                 weeklyPlanStore.save(data.weeklyPlan);
                 runOnUiThread(() -> {
                     reloadRecipes();
+                    resetPlanExpansion();
                     setContentView(buildHome());
                     renderRecipes();
                     settingsDialog.dismiss();
@@ -537,6 +567,7 @@ public class MainActivity extends Activity {
 
         List<String> plan = pickPlanDishes(source, PLAN_SIZE);
         weeklyPlanStore.save(plan);
+        resetPlanExpansion();
         setContentView(buildHome());
         renderRecipes();
         showWeeklyPlanDialog(plan);
@@ -738,6 +769,39 @@ public class MainActivity extends Activity {
         return count;
     }
 
+    private int dayFilledCount(List<String> plan, int dayIndex) {
+        int count = 0;
+        for (int slot = 0; slot < PLAN_SLOTS.length; slot++) {
+            String dish = planDish(plan, dayIndex, slot);
+            if (!dish.isEmpty() && !dish.equals("待安排")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private String dayPreviewText(List<String> plan, int dayIndex) {
+        List<String> preview = new ArrayList<>();
+        for (int slot = 0; slot < PLAN_SLOTS.length && preview.size() < 3; slot++) {
+            String dish = planDish(plan, dayIndex, slot);
+            if (!dish.isEmpty() && !dish.equals("待安排")) {
+                preview.add(dish);
+            }
+        }
+        if (preview.isEmpty()) {
+            return "暂无安排";
+        }
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < preview.size(); i++) {
+            if (i > 0) text.append(" / ");
+            text.append(preview.get(i));
+        }
+        if (dayFilledCount(plan, dayIndex) > preview.size()) {
+            text.append(" ...");
+        }
+        return text.toString();
+    }
+
     private String planDish(List<String> plan, int dayIndex, int slotIndex) {
         int index = planIndex(dayIndex, slotIndex);
         if (index >= plan.size()) {
@@ -748,6 +812,12 @@ public class MainActivity extends Activity {
 
     private int planIndex(int dayIndex, int slotIndex) {
         return dayIndex * PLAN_SLOTS.length + slotIndex;
+    }
+
+    private void resetPlanExpansion() {
+        for (int i = 0; i < expandedDays.length; i++) {
+            expandedDays[i] = i == 0;
+        }
     }
 
     private String ingredientsText(Recipe recipe, double scale) {
