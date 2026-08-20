@@ -1,0 +1,27 @@
+services:
+  relay:
+    build:
+      context: .
+    image: flymeauto1.0
+    pull_policy: build
+    restart: unless-stopped
+    environment:
+      PORT: "8295"
+      VEHICLE_TOKEN: "${VEHICLE_TOKEN:?VEHICLE_TOKEN is required}"
+      OWNER_PASSWORD: "${OWNER_PASSWORD:-}"
+      OWNER_PASSWORD_HASH: "${OWNER_PASSWORD_HASH:-}"
+      DOWNLOAD_DIR: "/downloads"
+      DEVICE_AUTH_FILE: "/state/device-auth.json"
+    ports:
+      - "8295:8295"
+    volumes:
+      - ./downloads:/downloads:ro
+      - device_state:/state
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+volumes:
+  device_state:

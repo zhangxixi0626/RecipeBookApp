@@ -24,6 +24,25 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Test NAS relay
+        working-directory: server
+        run: |
+          npm ci
+          npm test
+          docker compose --env-file .env.example -f compose.yaml config --quiet
+          docker compose --env-file .env.example -f compose-relay-only.yaml config --quiet
+          docker compose -f compose-ugreen.yaml config --quiet
+
+      - name: Build NAS relay image
+        run: docker build -t lynk10-relay:ci server
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -41,12 +60,12 @@ jobs:
       - name: Prepare APK
         run: |
           mkdir -p artifacts
-          cp lynk10app/build/outputs/apk/debug/lynk10app-debug.apk artifacts/Lynk10EV-1.03-test-08202231-debug.apk
+          cp lynk10app/build/outputs/apk/debug/lynk10app-debug.apk artifacts/Lynk10EV1.04.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Lynk10EV-APK
-          path: artifacts/*.apk
+          name: Lynk10EV1.04
+          path: artifacts/Lynk10EV1.04.apk
           if-no-files-found: error
           retention-days: 30

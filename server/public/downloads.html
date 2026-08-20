@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>车机软件仓库</title>
+  <style>
+    :root { color-scheme:dark; --bg:#0b1315; --panel:#122126; --line:#294149; --green:#62d2bd; --muted:#91a5aa; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:#eef7f5; font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(820px,100%); margin:auto; padding:24px 16px 48px; }
+    h1 { margin:0 0 6px; font-size:26px; }
+    .sub,.empty { color:var(--muted); }
+    .toolbar { display:flex; gap:10px; align-items:center; margin:20px 0 12px; }
+    button,.download { min-height:44px; border-radius:11px; border:1px solid var(--line); font:inherit; }
+    button { padding:0 16px; background:#17292e; color:#eef7f5; cursor:pointer; }
+    .count { margin-left:auto; color:var(--muted); }
+    .list { display:grid; gap:10px; }
+    .item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; padding:14px; background:var(--panel); border:1px solid var(--line); border-radius:14px; }
+    .name { overflow-wrap:anywhere; font-weight:650; }
+    .meta { margin-top:3px; color:var(--muted); font-size:13px; }
+    .download { display:grid; place-items:center; min-width:88px; padding:0 16px; background:var(--green); color:#08201d; text-decoration:none; font-weight:700; }
+    .empty { padding:28px 14px; text-align:center; border:1px dashed var(--line); border-radius:14px; }
+    @media(max-width:520px){ .item{grid-template-columns:1fr}.download{width:100%} }
+  </style>
+</head>
+<body>
+<main>
+  <h1>车机软件仓库</h1>
+  <div class="sub">NAS下载目录中的软件会自动显示在这里。</div>
+  <div class="toolbar">
+    <button id="refresh" type="button">刷新列表</button>
+    <span class="count" id="count"></span>
+  </div>
+  <section class="list" id="list"><div class="empty">正在读取软件列表...</div></section>
+</main>
+<script>
+  const list = document.querySelector('#list');
+  const count = document.querySelector('#count');
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  }
+
+  function addFile(file) {
+    const item = document.createElement('article');
+    item.className = 'item';
+    const details = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = file.name;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = `${formatSize(file.size)} · ${new Date(file.modifiedAt).toLocaleString('zh-CN')}`;
+    details.append(name, meta);
+    const link = document.createElement('a');
+    link.className = 'download';
+    link.href = `/download/file/${file.id}`;
+    link.textContent = '下载';
+    item.append(details, link);
+    list.appendChild(item);
+  }
+
+  async function loadFiles() {
+    list.innerHTML = '<div class="empty">正在读取软件列表...</div>';
+    count.textContent = '';
+    try {
+      const response = await fetch('/api/downloads', { cache:'no-store' });
+      if (!response.ok) throw new Error('request failed');
+      const files = await response.json();
+      list.replaceChildren();
+      count.textContent = `共 ${files.length} 个文件`;
+      if (!files.length) {
+        list.innerHTML = '<div class="empty">下载目录还是空的，请先在NAS中放入软件。</div>';
+        return;
+      }
+      files.forEach(addFile);
+    } catch {
+      list.innerHTML = '<div class="empty">列表读取失败，请稍后重试。</div>';
+    }
+  }
+
+  document.querySelector('#refresh').onclick = loadFiles;
+  loadFiles();
+</script>
+</body>
+</html>

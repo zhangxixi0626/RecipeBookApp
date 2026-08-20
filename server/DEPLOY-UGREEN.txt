@@ -1,0 +1,29 @@
+绿联 NAS 部署
+
+1. 将压缩包完整解压到同一个目录，不能遗漏 public 和 downloads 文件夹。
+2. 打开 compose.yaml，设置两个不同的秘密：
+   VEHICLE_TOKEN：至少32位随机字符串，只填写到车机App；
+   OWNER_PASSWORD：至少12位的网页访问密码，不要与VEHICLE_TOKEN相同。
+3. 在绿联 Container Manager 中以该目录创建 Compose 项目并选择重新构建。
+4. 本地镜像名称固定为 flymeauto1.0:latest，服务端口为 8295。
+5. 已有 Cloudflare Tunnel 时，将公共主机名的服务地址指向 http://NAS局域网IP:8295。
+
+检查地址：
+http://NAS局域网IP:8295/health
+http://NAS局域网IP:8295/
+http://NAS局域网IP:8295/downloads.html
+
+车机服务器地址：
+wss://你的Cloudflare域名/ws/vehicle
+
+手机网页：
+https://你的Cloudflare域名/
+
+第一次用主手机打开网页时，输入一次 OWNER_PASSWORD 完成绑定。以后同一手机浏览器会
+使用设备私钥自动验证。其他设备可以输入 OWNER_PASSWORD 临时访问，会话30分钟后失效。
+不要清理主手机中这个网站的浏览器数据，否则本机密钥也会被删除。
+
+更换或丢失手机时，在 Container Manager 中停止并删除项目使用的 device_state 数据卷，
+然后重新创建项目。下一台手机就可以重新绑定。下载仓库保持公开，方便车机下载安装包。
+
+车机应用填写 VEHICLE_TOKEN。锁车前打开应用后会自动开始守候。

@@ -1,0 +1,22 @@
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flymeauto1.0:latest
+    restart: unless-stopped
+    environment:
+      PORT: "8295"
+      VEHICLE_TOKEN: "CHANGE_THIS_TO_YOUR_RANDOM_TOKEN_32_CHARS"
+      OWNER_PASSWORD: "CHANGE_THIS_TO_A_DIFFERENT_STRONG_PASSWORD"
+      OWNER_PASSWORD_HASH: ""
+      DOWNLOAD_DIR: "/downloads"
+      DEVICE_AUTH_FILE: "/state/device-auth.json"
+    ports:
+      - "8295:8295"
+    volumes:
+      - ./downloads:/downloads:ro
+      - device_state:/state
+
+volumes:
+  device_state:

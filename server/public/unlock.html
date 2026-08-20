@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>验证手机</title>
+  <style>
+    :root { color-scheme:dark; --bg:#0b1315; --panel:#122126; --line:#294149; --green:#62d2bd; --muted:#91a5aa; --red:#ff958f; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:#eef7f5; font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(440px,calc(100% - 32px)); padding:22px; background:var(--panel); border:1px solid var(--line); border-radius:18px; }
+    h1 { margin:0 0 6px; font-size:25px; }
+    p { margin:8px 0; color:var(--muted); }
+    input,button { width:100%; min-height:48px; margin-top:12px; border:1px solid var(--line); border-radius:12px; font:inherit; }
+    input { padding:0 12px; background:#0c171a; color:#fff; }
+    button { background:var(--green); color:#08201d; font-weight:700; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:wait; }
+    .status { min-height:23px; margin-top:14px; color:var(--muted); overflow-wrap:anywhere; }
+    .error { color:var(--red); }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+<main>
+  <h1 id="title">正在验证这台手机</h1>
+  <p id="description">验证通过后会直接进入监看页面，以后不需要再输密码。</p>
+  <section id="enroll" class="hidden">
+    <input id="enroll-password" type="password" autocomplete="current-password" placeholder="输入管理密码">
+    <button id="bind" type="button">绑定这台手机</button>
+  </section>
+  <section id="password-login" class="hidden">
+    <input id="login-password" type="password" autocomplete="current-password" placeholder="输入访问密码">
+    <button id="login" type="button">密码访问（本次会话）</button>
+  </section>
+  <div id="status" class="status">请稍候...</div>
+</main>
+<script>
+  const DB_NAME = 'lynk-device-auth';
+  const STORE_NAME = 'keys';
+  const RECORD_ID = 'bound-phone';
+  const statusView = document.querySelector('#status');
+  const enrollView = document.querySelector('#enroll');
+  const passwordLoginView = document.querySelector('#password-login');
+  const bindButton = document.querySelector('#bind');
+  const loginButton = document.querySelector('#login');
+  const titleView = document.querySelector('#title');
+  const descriptionView = document.querySelector('#description');
+  const requestedNext = new URLSearchParams(location.search).get('next') || '/';
+  const nextPage = requestedNext.startsWith('/') && !requestedNext.startsWith('//') ? requestedNext : '/';
+
+  function setStatus(text, isError = false) {
+    statusView.textContent = text;
+    statusView.classList.toggle('error', isError);
+  }
+
+  function openDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function readDevice() {
+    const database = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const request = database.transaction(STORE_NAME).objectStore(STORE_NAME).get(RECORD_ID);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function saveDevice(device) {
+    const database = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      transaction.objectStore(STORE_NAME).put(device, RECORD_ID);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  function decodeBase64Url(value) {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(normalized + '='.repeat((4 - normalized.length % 4) % 4));
+    return Uint8Array.from(binary, character => character.charCodeAt(0));
+  }
+
+  function encodeBase64Url(value) {
+    const bytes = new Uint8Array(value);
+    let binary = '';
+    bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+
+  async function createDevice() {
+    const generated = await crypto.subtle.generateKey(
+      { name:'ECDSA', namedCurve:'P-256' }, true, ['sign', 'verify']
+    );
+    const publicKeyJwk = await crypto.subtle.exportKey('jwk', generated.publicKey);
+    const privateKeyJwk = await crypto.subtle.exportKey('jwk', generated.privateKey);
+    const privateKey = await crypto.subtle.importKey(
+      'jwk', privateKeyJwk, { name:'ECDSA', namedCurve:'P-256' }, false, ['sign']
+    );
+    return { deviceId:crypto.randomUUID(), publicKeyJwk, privateKey };
+  }
+
+  async function postJson(url, payload) {
+    const response = await fetch(url, {
+      method:'POST', credentials:'same-origin',
+      headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(payload)
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || '服务器没有接受请求');
+    return body;
+  }
+
+  async function unlock(device) {
+    setStatus('正在确认设备...');
+    const challenge = await postJson('/api/device/challenge', { deviceId:device.deviceId });
+    const signature = await crypto.subtle.sign(
+      { name:'ECDSA', hash:'SHA-256' }, device.privateKey, decodeBase64Url(challenge.challenge)
+    );
+    await postJson('/api/device/verify', {
+      id:challenge.id, deviceId:device.deviceId, signature:encodeBase64Url(signature)
+    });
+    setStatus('验证通过，正在打开监看页面');
+    location.replace(nextPage);
+  }
+
+  function showEnrollment() {
+    titleView.textContent = '绑定这台手机';
+    descriptionView.textContent = '第一次需要输入管理密码。绑定后，只有这个浏览器可以免输密码。';
+    enrollView.classList.remove('hidden');
+    passwordLoginView.classList.add('hidden');
+    setStatus('还没有绑定手机');
+  }
+
+  function showPasswordLogin(message = '监看页面已绑定主手机，这台设备需要输入密码。') {
+    titleView.textContent = '密码访问';
+    descriptionView.textContent = message;
+    enrollView.classList.add('hidden');
+    passwordLoginView.classList.remove('hidden');
+    setStatus('密码会话30分钟后自动失效');
+  }
+
+  bindButton.onclick = async () => {
+    const password = document.querySelector('#enroll-password').value;
+    if (!password) { setStatus('请输入管理密码', true); return; }
+    bindButton.disabled = true;
+    try {
+      const device = await readDevice() || await createDevice();
+      await saveDevice(device);
+      await postJson('/api/device/enroll', {
+        password, deviceId:device.deviceId, publicKeyJwk:device.publicKeyJwk
+      });
+      location.replace(nextPage);
+    } catch (error) {
+      setStatus(error.message || '绑定失败', true);
+      bindButton.disabled = false;
+    }
+  };
+
+  loginButton.onclick = async () => {
+    const password = document.querySelector('#login-password').value;
+    if (!password) { setStatus('请输入访问密码', true); return; }
+    loginButton.disabled = true;
+    try {
+      await postJson('/api/auth/password', { password });
+      location.replace(nextPage);
+    } catch (error) {
+      setStatus(error.message || '密码验证失败', true);
+      loginButton.disabled = false;
+    }
+  };
+
+  (async () => {
+    if (!window.isSecureContext || !window.crypto?.subtle) {
+      setStatus('设备绑定必须通过HTTPS地址打开', true);
+      return;
+    }
+    try {
+      const response = await fetch('/api/device/status', { cache:'no-store', credentials:'same-origin' });
+      const serverState = await response.json();
+      if (serverState.authenticated) { location.replace(nextPage); return; }
+      const device = await readDevice();
+      if (!serverState.enrolled) { showEnrollment(); return; }
+      if (!device) { showPasswordLogin(); return; }
+      try {
+        await unlock(device);
+      } catch {
+        showPasswordLogin('本机保存的设备密钥已失效，请输入密码临时访问；如需重新免密绑定，请在NAS中重置主手机。');
+      }
+    } catch (error) {
+      setStatus(error.message || '验证失败，请刷新页面重试', true);
+    }
+  })();
+</script>
+</body>
+</html>

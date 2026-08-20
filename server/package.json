@@ -1,0 +1,17 @@
+{
+  "name": "lynk10-remote-view-server",
+  "version": "1.08",
+  "private": true,
+  "description": "Self-hosted relay for Lynk 10 EV snapshot monitoring",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check password-auth.js && node --check hash-password.js && node --check reset-device.js && node --check test-smoke.js",
+    "test": "node test-smoke.js",
+    "hash-password": "node hash-password.js",
+    "reset-device": "node reset-device.js"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  }
+}

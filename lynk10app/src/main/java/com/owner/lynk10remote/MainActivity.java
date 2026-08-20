@@ -101,11 +101,12 @@ public final class MainActivity extends AppCompatActivity {
 
         serverField = field("远程服务器，例如 wss://example.com/ws/vehicle", InputType.TYPE_TEXT_VARIATION_URI);
         deviceField = field("车辆编号，例如 lynk10ev-01", InputType.TYPE_CLASS_TEXT);
-        tokenField = field("配对密钥", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        tokenField = field("车机连接密钥（VEHICLE_TOKEN）",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         cameraIdsField = field("Camera ID顺序：前,后,左,右；可先试EVCam的 2,1,3,0", InputType.TYPE_CLASS_TEXT);
         form.addView(label("远程服务器")); form.addView(serverField);
         form.addView(label("车辆编号")); form.addView(deviceField);
-        form.addView(label("配对密钥")); form.addView(tokenField);
+        form.addView(label("车机连接密钥")); form.addView(tokenField);
         form.addView(label("相机ID")); form.addView(cameraIdsField);
 
         webDavUrlField = field("https://dav.example.com/remote.php/dav/files/user/",
@@ -206,7 +207,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private void startGuardAutomatically() {
         if (!hasGuardConfiguration()) {
-            statusView.setText("请先配置服务器、车辆编号、配对密钥和4个Camera ID");
+            statusView.setText("请先配置服务器、车辆编号、车机连接密钥和4个Camera ID");
             return;
         }
         if (!hasCameraPermission()) {

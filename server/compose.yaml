@@ -1,0 +1,50 @@
+services:
+  relay:
+    build:
+      context: .
+    image: flymeauto1.0
+    pull_policy: build
+    restart: unless-stopped
+    environment:
+      PORT: "8295"
+      VEHICLE_TOKEN: "${VEHICLE_TOKEN:?VEHICLE_TOKEN is required}"
+      OWNER_PASSWORD: "${OWNER_PASSWORD:-}"
+      OWNER_PASSWORD_HASH: "${OWNER_PASSWORD_HASH:-}"
+      DOWNLOAD_DIR: "/downloads"
+      DEVICE_AUTH_FILE: "/state/device-auth.json"
+    expose:
+      - "8295"
+    volumes:
+      - ./downloads:/downloads:ro
+      - device_state:/state
+    networks:
+      - private
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - "${TUNNEL_TOKEN:?TUNNEL_TOKEN is required}"
+    depends_on:
+      relay:
+        condition: service_healthy
+    networks:
+      - private
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  private:
+    internal: false
+
+volumes:
+  device_state:

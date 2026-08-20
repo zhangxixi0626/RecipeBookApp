@@ -12,8 +12,8 @@ android {
         applicationId = "com.youku.phone"
         minSdk = 28
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.03-test-08202231"
+        versionCode = 6
+        versionName = "1.04"
 
         ndk {
             abiFilters += "arm64-v8a"

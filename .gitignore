@@ -5,3 +5,8 @@ local.properties
 *.keystore
 .idea/
 .DS_Store
+server/node_modules/
+server/.env
+server/state/
+server/.test-device-auth-*.json
+server/.test-downloads-*/

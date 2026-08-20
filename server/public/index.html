@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>领克10远程监看</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1315; --panel:#122126; --line:#294149; --green:#62d2bd; --muted:#91a5aa; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:#eef7f5; font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(980px,100%); margin:auto; padding:24px 18px 40px; }
+    h1 { margin:0 0 4px; font-size:26px; font-weight:650; }
+    .sub,.status { color:var(--muted); }
+    .panel { margin-top:20px; padding:16px; background:var(--panel); border:1px solid var(--line); border-radius:16px; }
+    .form { display:grid; grid-template-columns:1fr; gap:10px; }
+    input,button { width:100%; min-height:46px; border-radius:11px; border:1px solid var(--line); font:inherit; }
+    input { padding:0 12px; background:#0c171a; color:#fff; }
+    button { margin-top:10px; background:var(--green); color:#08201d; font-weight:700; cursor:pointer; }
+    .download { display:block; margin-top:10px; padding:12px; border:1px solid var(--line); border-radius:11px; color:#eef7f5; text-align:center; text-decoration:none; }
+    button:disabled { opacity:.45; cursor:wait; }
+    .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:18px; }
+    figure { margin:0; overflow:hidden; min-height:190px; background:#101b1e; border:1px solid var(--line); border-radius:14px; position:relative; }
+    img { width:100%; height:100%; min-height:190px; object-fit:cover; display:none; }
+    figcaption { position:absolute; left:10px; top:8px; padding:3px 8px; border-radius:8px; background:#0009; }
+    .empty { display:grid; min-height:190px; place-items:center; color:var(--muted); }
+    @media(max-width:680px){ .form,.grid{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+<main>
+  <h1>领克10远程监看</h1>
+  <div class="sub">每次点击都会重新抓取当前画面。页面不会保存历史图片。</div>
+  <section class="panel">
+    <div class="form">
+      <input id="device" autocomplete="off" placeholder="车辆编号" value="lynk10ev-01">
+    </div>
+    <button id="connect">重新连接</button>
+    <button id="capture" disabled>刷新周围画面</button>
+    <a class="download" href="/downloads.html">打开车机软件仓库</a>
+    <div id="status" class="status">尚未连接</div>
+  </section>
+  <section class="grid" id="grid"></section>
+</main>
+<script>
+  const names = { front:'前方', rear:'后方', left:'左侧', right:'右侧', panorama:'全景' };
+  const grid = document.querySelector('#grid');
+  const status = document.querySelector('#status');
+  const captureButton = document.querySelector('#capture');
+  const deviceInput = document.querySelector('#device');
+  let socket;
+  let activeRequest = null;
+  let vehicleArmed = false;
+  let reconnectTimer;
+
+  deviceInput.value = localStorage.getItem('lynk_vehicle_id') || 'lynk10ev-01';
+  deviceInput.addEventListener('change', () => {
+    localStorage.setItem('lynk_vehicle_id', deviceInput.value.trim());
+  });
+
+  function setStatus(text){ status.textContent = text; }
+  function updateVehicleState(online, armed, lastSeen){
+    vehicleArmed = Boolean(online && armed);
+    captureButton.disabled = !vehicleArmed;
+    if(!online){ setStatus('车辆已离线'); return; }
+    if(!armed){ setStatus('车辆在线，但相机尚未在车机前台布防'); return; }
+    const seen = lastSeen ? ` · 心跳 ${new Date(lastSeen).toLocaleTimeString()}` : '';
+    setStatus(`车辆在线，相机已布防${seen}`);
+  }
+  function resetGrid(){
+    grid.innerHTML = '';
+    ['front','rear','left','right'].forEach(position => {
+      const figure = document.createElement('figure');
+      figure.dataset.position = position;
+      figure.innerHTML = `<div class="empty">等待${names[position]}画面</div><img alt="${names[position]}"><figcaption>${names[position]}</figcaption>`;
+      grid.appendChild(figure);
+    });
+  }
+  resetGrid();
+
+  function connectViewer() {
+    clearTimeout(reconnectTimer);
+    if(socket) {
+      socket.onclose = null;
+      socket.close();
+    }
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    socket = new WebSocket(`${scheme}//${location.host}/ws/viewer`);
+    socket.onclose = () => {
+      captureButton.disabled = true;
+      setStatus('连接已断开，正在重试');
+      reconnectTimer = setTimeout(connectViewer, 3000);
+    };
+    socket.onerror = () => setStatus('连接失败，请检查服务器和证书');
+    socket.onmessage = event => {
+      const message = JSON.parse(event.data);
+      if(message.type === 'viewer_ready'){
+        const device = deviceInput.value;
+        const online = message.online.includes(device);
+        const state = (message.vehicles || []).find(item => item.deviceId === device);
+        updateVehicleState(online, state ? state.armed : false, state ? state.lastSeen : null);
+      }
+      if(message.type === 'vehicle_status' && message.deviceId === deviceInput.value){
+        updateVehicleState(message.online, message.armed, message.lastSeen);
+      }
+      if(message.type === 'capture_started'){
+        activeRequest = message.requestId; resetGrid(); setStatus('车辆正在抓拍');
+      }
+      if(message.type === 'capture_frame' && message.requestId === activeRequest){
+        let figure = grid.querySelector(`[data-position="${message.position}"]`);
+        if(!figure) figure = grid.querySelector('figure');
+        const image = figure.querySelector('img');
+        image.src = `data:${message.mime};base64,${message.imageBase64}`;
+        image.style.display = 'block';
+        figure.querySelector('.empty').style.display = 'none';
+        figure.querySelector('figcaption').textContent = `${names[message.position] || message.position} · ${message.cameraId}`;
+      }
+      if(message.type === 'capture_complete' && message.requestId === activeRequest){
+        captureButton.disabled = !vehicleArmed;
+        setStatus(`更新于 ${new Date(message.capturedAt).toLocaleTimeString()}，收到${message.frameCount}张${message.errors ? '；'+message.errors : ''}`);
+      }
+      if(message.type === 'capture_error'){
+        captureButton.disabled = !vehicleArmed; setStatus(message.error || '抓拍失败');
+      }
+    };
+    setStatus('正在连接');
+  }
+
+  document.querySelector('#connect').onclick = connectViewer;
+
+  captureButton.onclick = () => {
+    if(!socket || socket.readyState !== WebSocket.OPEN) return;
+    captureButton.disabled = true;
+    socket.send(JSON.stringify({ type:'capture', deviceId:deviceInput.value }));
+  };
+  connectViewer();
+</script>
+</body>
+</html>
