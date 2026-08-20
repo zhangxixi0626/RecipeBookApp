@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">领克10远程监看</string>
+    <string name="channel_name">远程守候</string>
+    <string name="channel_description">保持车辆在线，收到请求后抓取当前画面</string>
+</resources>
